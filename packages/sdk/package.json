@@ -1,0 +1,11 @@
+{
+  "name": "@tracemorph/sdk",
+  "version": "0.1.0",
+  "description": "Zero-dependency instrumentation SDK for TraceMorph agent time-travel debugging",
+  "type": "module",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "scripts": {
+    "test": "node --test"
+  }
+}
