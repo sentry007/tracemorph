@@ -1,0 +1,19 @@
+{
+  "name": "@tracemorph/server",
+  "version": "0.1.0",
+  "description": "Local TraceMorph event engine and SQLite store for AI agent time-travel debugging",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "cors": "^2.8.5",
+    "diff": "^7.0.0",
+    "express": "^4.21.2",
+    "uuid": "^9.0.1",
+    "ws": "^8.18.0"
+  }
+}
