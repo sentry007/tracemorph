@@ -1,0 +1,11 @@
+{
+  "name": "tracemorph-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "server": "npm run start --prefix packages/server",
+    "ui": "npm run dev --prefix packages/ui",
+    "demo": "node examples/demo-agent.js"
+  }
+}
