@@ -93,6 +93,20 @@ export class TraceMorph {
           const stepData = await res.json();
           stepObj.stepId = stepData.stepId;
           return stepObj.stepId;
+        } else {
+          // Step was committed early by recordToolCall; update it with final reasoning and latency
+          const res = await fetch(`${this.endpoint}/api/steps/${stepObj.stepId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              completionText,
+              completionTokens,
+              latencyMs,
+              checkpointState: checkpointState || stepObj.checkpointState
+            })
+          });
+          const stepData = await res.json();
+          return stepObj.stepId;
         }
       },
 

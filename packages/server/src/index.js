@@ -8,10 +8,12 @@ import {
   listRuns,
   getRun,
   addStep,
+  updateStep,
   addToolCall,
   forkRun,
   computeStepDiff
 } from './db.js';
+import { proxyRouter } from './proxy.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -29,6 +31,9 @@ function broadcast(type, payload) {
     }
   });
 }
+
+app.set('broadcast', broadcast);
+app.use('/v1', proxyRouter);
 
 wss.on('connection', ws => {
   ws.send(JSON.stringify({ type: 'connected', payload: { server: 'TraceMorph Engine v0.1' } }));
@@ -123,6 +128,23 @@ app.post('/api/runs/:id/steps', (req, res) => {
   }
 });
 
+// Update a step (completion text, tokens, latency, checkpoint)
+app.patch('/api/steps/:id', (req, res) => {
+  try {
+    const stepId = req.params.id;
+    const { completionText, completionTokens, latencyMs, checkpointState } = req.body;
+    const updatedStep = updateStep(stepId, { completionText, completionTokens, latencyMs, checkpointState });
+    if (!updatedStep) {
+      return res.status(404).json({ success: false, error: 'Step not found' });
+    }
+    const updatedRun = getRun(updatedStep.run_id);
+    broadcast('step_recorded', { runId: updatedStep.run_id, stepId, run: updatedRun });
+    res.json({ success: true, step: updatedStep, run: updatedRun });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Log a tool call for a step
 app.post('/api/steps/:stepId/tools', (req, res) => {
   try {
@@ -202,16 +224,44 @@ app.post('/api/runs/:id/resume', async (req, res) => {
     let promptTokens = Math.round(lastStep.prompt_context.length / 4) + 60;
     let completionTokens = 45;
 
-    // Check if external API key is provided for real LLM call
-    if (provider === 'openai' && apiKey) {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    // Check if external API key or local model provider is available for real execution
+    const antKey = apiKey?.startsWith('sk-ant') ? apiKey : (provider === 'anthropic' ? apiKey || process.env.ANTHROPIC_API_KEY : null);
+    const oaiKey = apiKey?.startsWith('sk-') ? apiKey : (provider === 'openai' ? apiKey || process.env.OPENAI_API_KEY : null);
+
+    if (antKey) {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
+          'x-api-key': antKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json'
         },
         body: JSON.stringify({
-          model: model || 'gpt-4o',
+          model: model || 'claude-3-7-sonnet-20250219',
+          max_tokens: 1024,
+          messages: [
+            {
+              role: 'user',
+              content: `${lastStep.prompt_context}\n\nPrevious Action Result: ${JSON.stringify(lastStep.tool_calls.map(t => ({ tool: t.tool_name, output: t.output_result })))}`
+            }
+          ]
+        })
+      });
+      const data = await response.json();
+      const textBlock = data.content?.find(b => b.type === 'text');
+      completionText = textBlock?.text || JSON.stringify(data.content || 'No response from Anthropic');
+      promptTokens = data.usage?.input_tokens || promptTokens;
+      completionTokens = data.usage?.output_tokens || completionTokens;
+    } else if (oaiKey || provider === 'ollama') {
+      const endpoint = provider === 'ollama' ? 'http://localhost:11434/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
+      const headers = { 'Content-Type': 'application/json' };
+      if (oaiKey) headers['Authorization'] = `Bearer ${oaiKey}`;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: provider === 'ollama' ? (model || 'llama3.2') : (model || 'gpt-4o'),
           messages: [
             { role: 'system', content: 'You are an autonomous agent debugging and continuing an execution trace.' },
             { role: 'user', content: `${lastStep.prompt_context}\n\nPrevious Action Result: ${JSON.stringify(lastStep.tool_calls.map(t => ({ tool: t.tool_name, output: t.output_result })))}` }

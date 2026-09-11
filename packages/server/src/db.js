@@ -161,6 +161,53 @@ export function addStep({
   return stepId;
 }
 
+export function updateStep(stepId, {
+  completionText,
+  completionTokens,
+  latencyMs,
+  checkpointState
+}) {
+  const updates = [];
+  const params = [];
+
+  if (completionText !== undefined) {
+    updates.push('completion_text = ?');
+    params.push(completionText);
+  }
+  if (completionTokens !== undefined) {
+    updates.push('completion_tokens = ?');
+    params.push(completionTokens);
+  }
+  if (latencyMs !== undefined) {
+    updates.push('latency_ms = ?');
+    params.push(latencyMs);
+  }
+
+  if (updates.length > 0) {
+    params.push(stepId);
+    const stmt = db.prepare(`UPDATE steps SET ${updates.join(', ')} WHERE id = ?`);
+    stmt.run(...params);
+  }
+
+  if (checkpointState !== undefined && checkpointState !== null) {
+    const existingCp = db.prepare(`SELECT id FROM checkpoints WHERE step_id = ?`).get(stepId);
+    if (existingCp) {
+      db.prepare(`UPDATE checkpoints SET serialized_state = ? WHERE step_id = ?`).run(
+        JSON.stringify(checkpointState),
+        stepId
+      );
+    } else {
+      db.prepare(`INSERT INTO checkpoints (id, step_id, serialized_state) VALUES (?, ?, ?)`).run(
+        `cp_${uuidv4().slice(0, 8)}`,
+        stepId,
+        JSON.stringify(checkpointState)
+      );
+    }
+  }
+
+  return db.prepare(`SELECT * FROM steps WHERE id = ?`).get(stepId);
+}
+
 export function addToolCall({
   id,
   stepId,
